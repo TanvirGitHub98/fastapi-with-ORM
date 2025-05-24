@@ -1,102 +1,60 @@
-from fastapi import FastAPI,HTTPException,status,Response,Depends
-from pydantic import BaseModel
-import psycopg2
-from psycopg2.extras import RealDictCursor
+from fastapi import FastAPI,Depends,HTTPException,Response,status
+from .database import Base,get_db,engine
 from . import models
-from . database import  engine,get_db
 from sqlalchemy.orm import Session
-
-
-models.Base.metadata.create_all(bind=engine)
-
-# try:
-#     conn=psycopg2.connect(host='localhost',database='fastapi',user='postgres',password='3149',cursor_factory=RealDictCursor)
-#     cursor=conn.cursor()
-#     print("Database connected Successfully!!!")
-# except Exception as error:
-#     print("Database connection failled",error)
-    
+from .schemas import Post,PostResponse
+from typing import List
 
 app=FastAPI()
 
+models.Base.metadata.create_all(bind=engine)
 
-
-class Posts(BaseModel):
-    title:str
-    content:str
-    published: bool
 
 @app.get('/')
 async def root():
-    return{"message":"Welcome to fastapi"}
+    return{"Message":"Welcome to FastAPi Project"}
 
-@app.get('/post')
-async def get_posts(db:Session=Depends(get_db)):
-    #without ORM
-    # cursor.execute(""" SELECT * FROM posts """)
-    # posts=cursor.fetchall()
-    # return {"posts":posts}
-    
-    #with ORM
-    post=db.query(models.Post).all()
-    return{"Data":post}
+@app.get('/post',response_model=List[PostResponse])
+async def get_all_data(db:Session=Depends(get_db)):
+    data=db.query(models.Post).all()
+    if not data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail=f"No data found in database")
+    return data
 
-@app.post('/post',status_code=status.HTTP_201_CREATED)
-async def submit_post(post:Posts,db:Session=Depends(get_db)):
-    # cursor.execute("""INSERT INTO posts(title,content,published)VALUES(%s,%s,%s) RETURNING * """,(post.title,post.content,post.published))
-    # new_post=cursor.fetchone()
-    # conn.commit()
-    new_post=models.Post(title=post.title,content=post.content,published=post.published)
+@app.post('/post',status_code=status.HTTP_201_CREATED,response_model=PostResponse)
+async def submit_post(post:Post, db:Session=Depends(get_db)):
+    new_post=models.Post(**post.model_dump())
     db.add(new_post)
     db.commit()
-    db.refresh(new_post)# it work similar like RETURNING *
+    db.refresh(new_post)
     
-    return{ "newPost":new_post}
+    return new_post
 
-@app.get('/post/{id}')
+@app.get('/post/{id}',response_model=PostResponse)
 async def get_post(id:int,db:Session=Depends(get_db)):
-    # cursor.execute("""SELECT * FROM posts WHERE id=%s""",str(id))
-    # post=cursor.fetchone()
-    post=db.query(models.Post).filter(models.Post.id==id).first()
-    
-    return{"post":post}
+    data=db.query(models.Post).filter(models.Post.id==id).first()
+    if not data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail=f"No Data Found for id-{id}")
+    return data
 
-@app.put('/post/{id}')
-async def update_post(id:int,post:Posts,db:Session=Depends(get_db)):
-    # cursor.execute("""UPDATE posts set title=%s,content=%s,published=%s where id=%s RETURNING *""",(post.title,post.content,post.published,str(id)))
-    # updated_post=cursor.fetchone()
-    # conn.commit()
-    
-    
-    #This is one way we can update but here we cannot use refresh
-    # get_post=db.query(models.Post).filter(models.Post.id==id).update({models.Post.title:post.title,models.Post.content:post.content,models.Post.published:post.published})
-   
-   
-    #This is second way to update data
-    get_post=db.query(models.Post).filter(models.Post.id==id).first()
-    if get_post==None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail=f"Data of id-{id} Not Found in database")
-    get_post.title=post.title
-    get_post.content=post.content
-    get_post.published=post.published
-    db.commit()
-    db.refresh(get_post)
-    
-    return{"data":get_post}
+@app.put('/post/{id}',response_model=PostResponse)
+async def update_post(id:int,post:Post,db:Session=Depends(get_db)):
+  data=db.query(models.Post).filter(models.Post.id==id).first()
+  if not data:
+      raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail=f'No data found in database fro id-{id}')
+  data.title=post.title
+  data.content=post.content
+  data.published=post.published
+  db.commit()
+  db.refresh(data)
+  return data   
 
-@app.delete('/post/{id}',status_code=status.HTTP_204_NO_CONTENT)
+@app.delete('/post/{id}')
 async def delete_post(id:int,db:Session=Depends(get_db)):
-    # cursor.execute("""DELETE FROM posts WHERE id=%s RETURNING * """,(str(id),))
-    # deleted_post=cursor.fetchone()
-    # conn.commit()
-
-    # if deleted_post==None:
-    #     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail=f"id{id} Not found")
-    # return Response(status_code=status.HTTP_204_NO_CONTENT)
-    post=db.query(models.Post).filter(models.Post.id==id).first()
-    if post==None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail=f"Data of Id-{id} Not found")
-    
-    db.delete(post)
+    data=db.query(models.Post).filter(models.Post.id==id).first()
+    if not data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail=f'Data for id-{id} Not Found in database')
+    db.delete(data)
     db.commit()
-    return {"Message":"Data of id-{id} Deleted Successfully"}
+    #db.refresh(data)
+    return  f'Data Deleted Successfully For id-{id}'
